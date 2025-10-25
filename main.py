@@ -2,6 +2,8 @@ import uvicorn
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.requests import Request
 import os
 import shutil
 import PyPDF2
@@ -14,17 +16,22 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Serve static HTML files (frontend)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
+@app.get("/")
+def upload_page(request: Request):
+    return templates.TemplateResponse("upload.html", {"request": request})
 
-@app.get("/", response_class=HTMLResponse)
-def serve_home():
-    """Serve the upload page."""
-    with open("static/index.html", "r") as f:
-        return f.read()
-
+def text_extract(file_path):
+    with open(file_path, "rb") as pdf_file:
+        reader = PyPDF2.PdfReader(pdf_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""
+    return text
 
 @app.post("/upload-pdf/")
-def upload_pdf(file: UploadFile = File(...)):
+def upload_pdf(request: Request, file: UploadFile = File(...)):
     """Accept a PDF upload and save it to disk."""
     if not file.filename.lower().endswith(".pdf"):
         return JSONResponse(content={"error": "Only PDF files are allowed."}, status_code=400)
@@ -33,16 +40,9 @@ def upload_pdf(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    with open(file_path, "rb") as pdf_file:
-        reader = PyPDF2.PdfReader(pdf_file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text()
+    text = text_extract(file_path)
 
-    #return text
-
-    return {"message": f"File '{file.filename}' uploaded successfully!"}
-
+    return templates.TemplateResponse("display.html", {"request": request, "text": text, "filename": file.filename})
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
