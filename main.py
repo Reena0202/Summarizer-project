@@ -4,6 +4,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.summarizers.lex_rank import LexRankSummarizer
+import nltk
+nltk.download('punkt_tab')
 import os
 import shutil
 import PyPDF2
@@ -30,19 +35,27 @@ def text_extract(file_path):
             text += page.extract_text() or ""
     return text
 
+def summarize_with_sumy(text, sentence_count=5):
+    parser = PlaintextParser.from_string(text, Tokenizer("english"))
+    summarizer = LexRankSummarizer()
+    summary = summarizer(parser.document, sentence_count)
+    summarized_text = " ".join(str(sentence) for sentence in summary)
+    return summarized_text
+
 @app.post("/upload-pdf/")
 def upload_pdf(request: Request, file: UploadFile = File(...)):
     """Accept a PDF upload and save it to disk."""
     if not file.filename.lower().endswith(".pdf"):
-        return JSONResponse(content={"error": "Only PDF files are allowed."}, status_code=400)
+        return HTMLResponse(content="Only PDF files are allowed.", status_code=400)
 
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     text = text_extract(file_path)
+    summary = summarize_with_sumy(text)
 
-    return templates.TemplateResponse("display.html", {"request": request, "text": text, "filename": file.filename})
+    return templates.TemplateResponse("display.html", {"request": request, "summary": summary, "filename": file.filename})
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
